@@ -1320,7 +1320,7 @@ input:focus,select:focus,textarea:focus{outline:none}
    FLOWERS HANDMADE · ADMIN PANEL · LÓGICA
 ═══════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '1.22.3';
+const APP_VERSION = '1.23.0';
 const APP_BUILD_DATE = '2026-05-03';
 const PUBLICATIONS_URL = 'https://flowershandmade25-pixel.github.io/web/tool/';
 
@@ -2000,11 +2000,11 @@ async function loadProducts(){
     const { data, error } = await sb.from('products')
       .select('*').order('name');
     if(error) throw error;
-    products = data || [];
+    products = acceptCloudRows(data, products);
   }catch(e){
     console.warn('loadProducts:', e);
-    // Fallback localStorage
-    const b = readBackup(); if(b?.products) products = b.products;
+    // Fallback localStorage (solo si no tenemos nada en memoria)
+    if(!products || !products.length){ const b = readBackup(); if(b?.products) products = b.products; }
   }
 }
 
@@ -2014,10 +2014,10 @@ async function loadSales(){
       .select('*')
       .order('created_at',{ ascending:false }).limit(500);
     if(error) throw error;
-    sales = data || [];
+    sales = acceptCloudRows(data, sales);
   }catch(e){
     console.warn('loadSales:', e);
-    const b = readBackup(); if(b?.sales) sales = b.sales;
+    if(!sales || !sales.length){ const b = readBackup(); if(b?.sales) sales = b.sales; }
   }
 }
 
@@ -2027,10 +2027,10 @@ async function loadCustomers(){
       .select('*')
       .order('total_purchases',{ ascending:false });
     if(error) throw error;
-    customers = data || [];
+    customers = acceptCloudRows(data, customers);
   }catch(e){
     console.warn('loadCustomers:', e);
-    const b = readBackup(); if(b?.customers) customers = b.customers;
+    if(!customers || !customers.length){ const b = readBackup(); if(b?.customers) customers = b.customers; }
   }
 }
 
@@ -2132,8 +2132,20 @@ async function loadProductCosts(){
 /* ───── BACKUP localStorage ───── */
 function saveBackup(){
   try{
+    // v1.23: el respaldo NUNCA debe encogerse a vacío algo que ya tenía datos
+    // (red de seguridad contra el bug "se guarda y al recargar desaparece").
+    const prev = readBackup() || {};
+    const keep = (mem, old) => {
+      const m = Array.isArray(mem)?mem:[]; const o = Array.isArray(old)?old:[];
+      return (m.length === 0 && o.length > 0) ? o : m;
+    };
     localStorage.setItem(LS_BACKUP_KEY, JSON.stringify({
-      products, sales, customers, paymentMethods, orders, productCosts,
+      products: keep(products, prev.products),
+      sales: keep(sales, prev.sales),
+      customers: keep(customers, prev.customers),
+      paymentMethods: keep(paymentMethods, prev.paymentMethods),
+      orders: keep(orders, prev.orders),
+      productCosts: keep(productCosts, prev.productCosts),
       savedAt: new Date().toISOString()
     }));
   }catch(e){}
@@ -2141,6 +2153,54 @@ function saveBackup(){
 function readBackup(){
   try{ return JSON.parse(localStorage.getItem(LS_BACKUP_KEY) || 'null'); }catch(e){ return null; }
 }
+
+// v1.23: al arrancar, mostrar de inmediato los últimos datos conocidos (respaldo)
+// para que el guard anti-borrado tenga algo que proteger si la nube hipa al cargar.
+function hydrateFromBackup(){
+  const b = readBackup(); if(!b) return;
+  if(Array.isArray(b.products)       && b.products.length       && !products.length)       products = b.products;
+  if(Array.isArray(b.sales)          && b.sales.length          && !sales.length)          sales = b.sales;
+  if(Array.isArray(b.customers)      && b.customers.length      && !customers.length)      customers = b.customers;
+  if(Array.isArray(b.paymentMethods) && b.paymentMethods.length && !paymentMethods.length) paymentMethods = b.paymentMethods;
+  if(Array.isArray(b.orders)         && b.orders.length         && !orders.length)         orders = b.orders;
+  if(Array.isArray(b.productCosts)   && b.productCosts.length   && !productCosts.length)   productCosts = b.productCosts;
+}
+
+// v1.23: una lectura de la nube que vuelve VACÍA no debe borrar datos buenos
+// que ya teníamos (caso típico: hipo de sesión/token o retraso de RLS en
+// conexiones móviles). Si la nube trae filas (aunque sean menos: un borrado
+// individual), se confía. Solo se ignora el caso "0 filas pero local tenía".
+function acceptCloudRows(incoming, current){
+  const inc = Array.isArray(incoming) ? incoming : [];
+  const cur = Array.isArray(current) ? current : [];
+  if (inc.length > 0) return inc;
+  if (cur.length === 0) return [];
+  console.warn('⚠ La nube devolvió 0 filas pero local tenía', cur.length, '— se conservan para no perder datos.');
+  return cur;
+}
+
+// v1.23: aviso visible cuando no hay conexión (los guardados quedan bloqueados).
+function showOfflineBanner(){
+  let b = document.getElementById('fhOfflineBanner');
+  const offline = !navigator.onLine;
+  if(offline){
+    if(!b){
+      b = document.createElement('div');
+      b.id = 'fhOfflineBanner';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;background:var(--gold,#b8935a);'
+        + 'color:#fff;text-align:center;padding:9px 14px;font-size:13px;font-weight:600;'
+        + "font-family:'Jost',sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.18);";
+      b.textContent = '⚠ Sin conexión — no se pueden guardar cambios hasta reconectar';
+      document.body.appendChild(b);
+    }
+    b.style.display = 'block';
+  } else if(b){
+    b.style.display = 'none';
+  }
+}
+window.addEventListener('online',  showOfflineBanner);
+window.addEventListener('offline', showOfflineBanner);
+document.addEventListener('DOMContentLoaded', () => setTimeout(showOfflineBanner, 1500));
 
 /* ───── MIGRACIÓN / SYNC: importar productos desde app_settings ───── */
 async function checkMigration(){
@@ -3046,6 +3106,9 @@ function onProdPhotoChange(e){
 async function saveProduct(){
   const name = document.getElementById('prodName').value.trim();
   if(!name){ toast('Ingresa el nombre'); return; }
+  // v1.23: ONLINE obligatorio. Sin conexión no se guarda (se evita el estado
+  // ambiguo offline que hacía aparecer/desaparecer productos).
+  if(!navigator.onLine || !sb){ toast('⚠ Sin conexión — conéctate para guardar el producto'); return; }
   const payload = {
     user_id: currentSessionId,
     name,
@@ -4803,6 +4866,9 @@ async function bootApp(){
     // Banner ya muestra instrucciones SQL
     return;
   }
+  // v1.23: mostrar últimos datos conocidos al instante (y proteger contra
+  // un hipo de la nube en el primer load).
+  hydrateFromBackup();
   await loadAll();
   await checkMigration();
   // Activar realtime y auto-refresh
