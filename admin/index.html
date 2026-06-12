@@ -1320,8 +1320,8 @@ input:focus,select:focus,textarea:focus{outline:none}
    FLOWERS HANDMADE · ADMIN PANEL · LÓGICA
 ═══════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '1.23.0';
-const APP_BUILD_DATE = '2026-05-03';
+const APP_VERSION = '1.24.0';
+const APP_BUILD_DATE = '2026-06-10';
 const PUBLICATIONS_URL = 'https://flowershandmade25-pixel.github.io/web/tool/';
 
 // Misma URL/KEY que index.html — NO se rompe el catálogo
@@ -2324,7 +2324,9 @@ async function doImportProducts(src, silentConfirm){
       cost: 0,
       stock: 0,
       tag: p.tag || null,
-      photo: p.photo || null,
+      // v1.27: el catálogo ahora guarda la foto en Storage como URL (photoUrl).
+      // Preferimos la URL; si no, caemos al base64 antiguo.
+      photo: p.photoUrl || p.photo || null,
       // Si el producto del catálogo no tiene id, usamos un sentinel determinístico
       // basado en nombre+timestamp del catálogo para no duplicarlo en futuras syncs
       legacy_id: p.id != null ? p.id : null
